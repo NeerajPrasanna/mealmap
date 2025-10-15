@@ -1,892 +1,304 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>MealMap — Fridge Admin Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* small visual tweaks */
-        .glass {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(4px);
-        }
+  <meta charset="UTF-8">
+  <title>MealMap Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+    import {
+      getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+      getDocs, collection
+    } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-        .card-hover:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 10px 20px rgba(2, 6, 23, 0.08);
-        }
+    // --- Firebase Config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDvRN3BXwGXKLUn9TJFv5kYcQCucSM5-2Y",
+      authDomain: "mealmap-123.firebaseapp.com",
+      projectId: "mealmap-123",
+      storageBucket: "mealmap-123.firebasestorage.app",
+      messagingSenderId: "517057007840",
+      appId: "1:517057007840:web:9efa6b0ac945f803e08085",
+    };
 
-        [x-cloak] {
-            display: none !important;
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // --- DOM Elements ---
+    const fridgeTableBody = document.getElementById("fridgeTableBody");
+    const fridgeForm = document.getElementById("fridgeForm");
+    const loadingSpinner = document.getElementById("loadingSpinner");
+
+    const modal = document.getElementById("fridgeModal");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalFridgeId = document.getElementById("modalFridgeId");
+    const modalLocation = document.getElementById("modalLocation");
+    const modalStatus = document.getElementById("modalStatus");
+    const modalTemp = document.getElementById("modalTemp");
+    const modalHumidity = document.getElementById("modalHumidity");
+    const modalFoodList = document.getElementById("modalFood");
+
+    // --- Load Fridges ---
+    async function loadFridges() {
+      showLoading(true);
+      fridgeTableBody.innerHTML = "";
+      try {
+        const querySnap = await getDocs(collection(db, "refrigerators"));
+        querySnap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const row = document.createElement("tr");
+          row.className = "border-b hover:bg-gray-50 transition";
+          row.innerHTML = `
+            <td class="px-4 py-2 font-semibold">${docSnap.id}</td>
+            <td class="px-4 py-2">${data.location}</td>
+            <td class="px-4 py-2">
+              <span class="px-2 py-1 rounded text-white ${data.status === "active" ? "bg-green-500" : "bg-red-500"}">
+                ${data.status}
+              </span>
+            </td>
+            <td class="px-4 py-2">${data.temperature ?? "-"}</td>
+            <td class="px-4 py-2">${data.humidity ?? "-"}</td>
+            <td class="px-4 py-2 space-x-2">
+              <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+                data-id="${docSnap.id}" data-action="view">View</button>
+              <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded"
+                data-id="${docSnap.id}" data-action="edit">Edit</button>
+              <button class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded"
+                data-id="${docSnap.id}" data-action="delete">Delete</button>
+            </td>
+          `;
+          fridgeTableBody.appendChild(row);
+        });
+      } catch (err) {
+        console.error("Error loading fridges:", err);
+      }
+      showLoading(false);
+    }
+
+    // --- Save Fridge (Create/Update) ---
+    async function saveFridge(e) {
+      e.preventDefault();
+      const id = fridgeForm.fridgeId.value.trim();
+      const location = fridgeForm.location.value.trim();
+      const status = fridgeForm.status.value;
+      const temperature = parseFloat(fridgeForm.temperature.value) || null;
+      const humidity = parseFloat(fridgeForm.humidity.value) || null;
+      if (!id || !location) return alert("Please fill required fields.");
+
+      showLoading(true);
+      try {
+        const fridgeRef = doc(db, "refrigerators", id);
+        const snap = await getDoc(fridgeRef);
+        if (snap.exists()) {
+          await updateDoc(fridgeRef, { location, status, temperature, humidity });
+        } else {
+          await setDoc(fridgeRef, { location, status, temperature, humidity, foodItems: [] });
         }
-    </style>
+        fridgeForm.reset();
+        await loadFridges();
+      } catch (err) {
+        console.error("Save error:", err);
+      }
+      showLoading(false);
+    }
+
+    // --- Delete Fridge ---
+    async function deleteFridge(id) {
+      if (!confirm(`Delete fridge ${id}?`)) return;
+      showLoading(true);
+      try {
+        await deleteDoc(doc(db, "refrigerators", id));
+        await loadFridges();
+      } catch (err) {
+        console.error("Delete error:", err);
+      }
+      showLoading(false);
+    }
+
+    // --- Edit Fridge (prefill form) ---
+    async function editFridge(id) {
+      const snap = await getDoc(doc(db, "refrigerators", id));
+      if (!snap.exists()) return alert("Fridge not found.");
+      const data = snap.data();
+      fridgeForm.fridgeId.value = id;
+      fridgeForm.location.value = data.location;
+      fridgeForm.status.value = data.status;
+      fridgeForm.temperature.value = data.temperature ?? "";
+      fridgeForm.humidity.value = data.humidity ?? "";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // --- View Fridge Details Modal ---
+    async function showDetails(id) {
+      const snap = await getDoc(doc(db, "refrigerators", id));
+      if (!snap.exists()) return alert("Fridge not found.");
+      const data = snap.data();
+      modalFridgeId.value = id;
+      modalTitle.innerText = `Fridge: ${id}`;
+      modalLocation.innerText = data.location;
+      modalStatus.innerText = data.status;
+      modalTemp.innerText = data.temperature ?? "-";
+      modalHumidity.innerText = data.humidity ?? "-";
+      modalFoodList.innerHTML = "";
+
+      (data.foodItems || []).forEach((item, index) => {
+        const li = document.createElement("li");
+        li.className = "flex justify-between items-center py-1";
+        li.innerHTML = `
+          <span>${item.name} (${item.quantity})</span>
+          <button data-index="${index}" data-id="${id}"
+            class="text-red-500 hover:text-red-700 text-sm">🗑</button>`;
+        modalFoodList.appendChild(li);
+      });
+
+      modal.classList.remove("hidden");
+    }
+
+    // --- Close Modal ---
+    window.closeModal = () => modal.classList.add("hidden");
+
+    // --- Add Food Item ---
+    async function addFoodItem(e) {
+      e.preventDefault();
+      const id = modalFridgeId.value;
+      const name = document.getElementById("foodName").value.trim();
+      const quantity = document.getElementById("foodQty").value.trim();
+      if (!name || !quantity) return alert("Enter both name and quantity.");
+
+      const ref = doc(db, "refrigerators", id);
+      const snap = await getDoc(ref);
+      const data = snap.data();
+      const updated = [...(data.foodItems || []), { name, quantity }];
+      await updateDoc(ref, { foodItems: updated });
+      document.getElementById("foodName").value = "";
+      document.getElementById("foodQty").value = "";
+      showDetails(id);
+    }
+
+    // --- Remove Food Item ---
+    modalFoodList.addEventListener("click", async (e) => {
+      if (e.target.matches("button[data-index]")) {
+        const id = e.target.dataset.id;
+        const idx = e.target.dataset.index;
+        const ref = doc(db, "refrigerators", id);
+        const snap = await getDoc(ref);
+        const items = snap.data().foodItems || [];
+        items.splice(idx, 1);
+        await updateDoc(ref, { foodItems: items });
+        showDetails(id);
+      }
+    });
+
+    // --- Event Delegation for Table Buttons ---
+    fridgeTableBody.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-id]");
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (action === "view") showDetails(id);
+      if (action === "edit") editFridge(id);
+      if (action === "delete") deleteFridge(id);
+    });
+
+    // --- Loading Spinner ---
+    function showLoading(show) {
+      loadingSpinner.classList.toggle("hidden", !show);
+    }
+
+    // --- Init ---
+    fridgeForm.addEventListener("submit", saveFridge);
+    document.getElementById("refreshBtn").addEventListener("click", loadFridges);
+    document.getElementById("addFoodForm").addEventListener("submit", addFoodItem);
+    window.addEventListener("load", loadFridges);
+  </script>
 </head>
 
-<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+<body class="flex min-h-screen bg-gray-100">
+  <!-- Sidebar -->
+  <aside class="w-64 bg-gray-800 text-white flex flex-col">
+    <div class="p-6 text-2xl font-bold border-b border-gray-700">MealMap Admin</div>
+    <nav class="flex-1 p-4 space-y-2">
+      <a href="#" class="block px-3 py-2 rounded hover:bg-gray-700">Dashboard</a>
+      <a href="#" class="block px-3 py-2 rounded bg-gray-700">Fridges</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-gray-700">Logs</a>
+    </nav>
+  </aside>
 
-    <div id="app" class="flex h-screen">
-        <!-- SIDEBAR -->
-        <aside id="sidebar" class="w-64 bg-white border-r hidden md:block">
-            <div class="p-6 pb-4 flex items-center gap-3">
-                <div
-                    class="h-10 w-10 rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold">
-                    MM</div>
-                <div>
-                    <h1 class="text-lg font-semibold">MealMap</h1>
-                    <p class="text-sm text-slate-500">Fridge Admin</p>
-                </div>
-            </div>
-            <nav class="px-4 py-2">
-                <ul class="space-y-1">
-                    <li>
-                        <button data-section="dashboard"
-                            class="w-full text-left px-4 py-2 rounded-md flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 10h4V3H3v7zm0 11h4v-7H3v7zm7 0h11v-11H10v11zm0-18v7h11V3H10z" />
-                            </svg>
-                            <span>Dashboard</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button data-section="fridges"
-                            class="w-full text-left px-4 py-2 rounded-md flex items-center gap-3 bg-slate-100">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M7 7h10v13H7z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M5 7V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3" />
-                            </svg>
-                            <span>Fridges</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button data-section="logs"
-                            class="w-full text-left px-4 py-2 rounded-md flex items-center gap-3 hover:bg-slate-50">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 0 0 2-2V7H3v12a2 2 0 0 0 2 2z" />
-                            </svg>
-                            <span>Logs (placeholder)</span>
-                        </button>
-                    </li>
-                </ul>
-            </nav>
-            <div class="mt-auto px-4 py-6">
-                <button id="collapseSidebar"
-                    class="w-full text-left px-4 py-2 rounded-md hover:bg-slate-50">Collapse</button>
-            </div>
-        </aside>
+  <!-- Main Content -->
+  <main class="flex-1 p-6 overflow-auto">
+    <header class="flex justify-between items-center mb-6">
+      <h1 class="text-3xl font-semibold text-gray-800">Fridge Manager</h1>
+      <button id="refreshBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+        Refresh
+      </button>
+    </header>
 
-        <!-- MAIN -->
-        <main class="flex-1 flex flex-col">
-            <!-- TOPBAR -->
-            <header class="flex items-center justify-between gap-4 px-4 py-3 border-b bg-white">
-                <div class="flex items-center gap-3">
-                    <button id="mobileMenuBtn" class="md:hidden p-2 rounded-md hover:bg-slate-100">
-                        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                    </button>
-                    <h2 id="pageTitle" class="text-lg font-semibold">Fridges</h2>
-                    <span class="text-sm text-slate-500">/ Monitor & manage refrigerators</span>
-                </div>
-
-                <div class="flex items-center gap-3">
-                    <div class="flex items-center gap-2">
-                        <button id="refreshBtn"
-                            class="inline-flex items-center gap-2 bg-white border px-3 py-2 rounded-md hover:bg-slate-50">
-                            <svg id="refreshIcon" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 11-8-8" />
-                            </svg>
-                            <span class="text-sm">Refresh</span>
-                        </button>
-                        <button id="addFridgeBtn"
-                            class="inline-flex items-center gap-2 bg-indigo-600 text-white px-3 py-2 rounded-md hover:bg-indigo-700">
-                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 4v16m8-8H4" />
-                            </svg>
-                            <span class="text-sm">Add Fridge</span>
-                        </button>
-                    </div>
-                    <div id="userBadge" class="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-md">
-                        <div
-                            class="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white flex items-center justify-center font-semibold">
-                            N</div>
-                        <div class="text-sm text-slate-600">Admin</div>
-                    </div>
-                </div>
-            </header>
-
-            <!-- CONTENT -->
-            <section class="p-4 overflow-auto">
-                <div class="grid md:grid-cols-3 gap-4 mb-4">
-                    <div class="glass p-4 rounded-xl card-hover">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <div class="text-sm text-slate-500">Total Fridges</div>
-                                <div id="totalFridges" class="text-2xl font-bold">—</div>
-                            </div>
-                            <svg class="w-8 h-8 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 12h18M3 6h18M3 18h18" />
-                            </svg>
-                        </div>
-                    </div>
-
-                    <div class="glass p-4 rounded-xl card-hover">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <div class="text-sm text-slate-500">Active</div>
-                                <div id="activeFridges" class="text-2xl font-bold text-green-600">—</div>
-                            </div>
-                            <svg class="w-8 h-8 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                    </div>
-
-                    <div class="glass p-4 rounded-xl card-hover">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <div class="text-sm text-slate-500">Avg Temp (°C)</div>
-                                <div id="avgTemp" class="text-2xl font-bold">—</div>
-                            </div>
-                            <svg class="w-8 h-8 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v10" />
-                            </svg>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Fridge Table Card -->
-                <div class="bg-white rounded-xl shadow p-4">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold">Fridges</h3>
-                        <div class="flex items-center gap-2">
-                            <input id="searchInput" type="search" placeholder="Search ID or location..."
-                                class="px-3 py-2 border rounded-md w-56" />
-                            <select id="statusFilter" class="px-3 py-2 border rounded-md">
-                                <option value="all">All statuses</option>
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="overflow-auto">
-                        <table class="min-w-full divide-y">
-                            <thead class="bg-slate-50 sticky top-0">
-                                <tr>
-                                    <th class="px-4 py-2 text-left text-sm text-slate-600">ID</th>
-                                    <th class="px-4 py-2 text-left text-sm text-slate-600">Location</th>
-                                    <th class="px-4 py-2 text-left text-sm text-slate-600">Status</th>
-                                    <th class="px-4 py-2 text-right text-sm text-slate-600">Temp (°C)</th>
-                                    <th class="px-4 py-2 text-right text-sm text-slate-600">Humidity (%)</th>
-                                    <th class="px-4 py-2 text-center text-sm text-slate-600">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="fridgeTableBody" class="bg-white divide-y"></tbody>
-                        </table>
-                    </div>
-
-                    <div class="mt-4 flex items-center justify-between">
-                        <div id="tableInfo" class="text-sm text-slate-500">Showing <span id="shownCount">0</span>
-                            fridges</div>
-                        <div class="flex items-center gap-2">
-                            <button id="prevPage" class="px-3 py-2 border rounded-md text-sm">Prev</button>
-                            <button id="nextPage" class="px-3 py-2 border rounded-md text-sm">Next</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <footer class="p-3 text-sm text-slate-500 border-t bg-white">© MealMap • Fridge Admin</footer>
-        </main>
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="hidden text-center py-4">
+      <div class="animate-spin border-t-4 border-blue-500 border-solid rounded-full w-10 h-10 mx-auto"></div>
     </div>
 
-    <!-- MODALS -->
-    <!-- Add/Edit Fridge Modal -->
-    <div id="fridgeFormModal" x-cloak
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
-        <div class="w-full max-w-2xl bg-white rounded-xl shadow p-6">
-            <div class="flex items-start justify-between gap-4">
-                <h3 id="formModalTitle" class="text-xl font-semibold">Add Fridge</h3>
-                <button id="closeFormModal" class="text-slate-500 hover:text-slate-800">✕</button>
-            </div>
+    <!-- Add/Update Form -->
+    <section class="bg-white p-6 rounded-lg shadow mb-6">
+      <h2 class="text-xl font-semibold mb-4">Add / Update Fridge</h2>
+      <form id="fridgeForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input name="fridgeId" placeholder="Fridge ID" class="border p-2 rounded" required>
+        <input name="location" placeholder="Location" class="border p-2 rounded" required>
+        <select name="status" class="border p-2 rounded">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <input name="temperature" type="number" placeholder="Temperature (°C)" class="border p-2 rounded">
+        <input name="humidity" type="number" placeholder="Humidity (%)" class="border p-2 rounded">
+        <button class="bg-green-600 hover:bg-green-700 text-white py-2 rounded col-span-1 md:col-span-2">
+          Save Fridge
+        </button>
+      </form>
+    </section>
 
-            <form id="fridgeForm" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                    <label class="block text-sm text-slate-600">Fridge ID</label>
-                    <input id="inputId" required class="mt-1 w-full px-3 py-2 border rounded-md" />
-                </div>
-                <div>
-                    <label class="block text-sm text-slate-600">Status</label>
-                    <select id="inputStatus" class="mt-1 w-full px-3 py-2 border rounded-md">
-                        <option value="active">active</option>
-                        <option value="inactive">inactive</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm text-slate-600">Location</label>
-                    <input id="inputLocation" class="mt-1 w-full px-3 py-2 border rounded-md" />
-                </div>
-                <div>
-                    <label class="block text-sm text-slate-600">Temperature (°C)</label>
-                    <input id="inputTemp" type="number" step="0.1" class="mt-1 w-full px-3 py-2 border rounded-md" />
-                </div>
-                <div>
-                    <label class="block text-sm text-slate-600">Humidity (%)</label>
-                    <input id="inputHumidity" type="number" step="0.1"
-                        class="mt-1 w-full px-3 py-2 border rounded-md" />
-                </div>
+    <!-- Fridges Table -->
+    <section class="bg-white p-6 rounded-lg shadow">
+      <h2 class="text-xl font-semibold mb-4">Fridges List</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full border text-sm">
+          <thead class="bg-gray-200 text-gray-700">
+            <tr>
+              <th class="px-4 py-2">ID</th>
+              <th class="px-4 py-2">Location</th>
+              <th class="px-4 py-2">Status</th>
+              <th class="px-4 py-2">Temp (°C)</th>
+              <th class="px-4 py-2">Humidity (%)</th>
+              <th class="px-4 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="fridgeTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
 
-                <div class="md:col-span-2 flex items-center gap-3 mt-2">
-                    <button id="saveFridgeBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-md">Save</button>
-                    <button id="saveCreateNew" type="button" class="px-4 py-2 border rounded-md">Save & New</button>
-                    <button id="cancelFormBtn" type="button" class="px-4 py-2 text-slate-600">Cancel</button>
-                    <div id="formSpinner" class="ml-auto hidden">
-                        <svg class="animate-spin w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                        </svg>
-                    </div>
-                </div>
-            </form>
-        </div>
+  <!-- Modal -->
+  <div id="fridgeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-lg p-6 w-full max-w-lg relative">
+      <button onclick="closeModal()" class="absolute top-3 right-4 text-2xl text-gray-500">&times;</button>
+      <h2 id="modalTitle" class="text-2xl font-bold mb-4">Fridge Details</h2>
+      <input type="hidden" id="modalFridgeId" />
+      <p><strong>Location:</strong> <span id="modalLocation"></span></p>
+      <p><strong>Status:</strong> <span id="modalStatus"></span></p>
+      <p><strong>Temperature:</strong> <span id="modalTemp"></span> °C</p>
+      <p><strong>Humidity:</strong> <span id="modalHumidity"></span> %</p>
+
+      <h3 class="font-semibold mt-4 mb-2">Food Items</h3>
+      <ul id="modalFood" class="border p-2 rounded bg-gray-50 max-h-40 overflow-y-auto"></ul>
+
+      <form id="addFoodForm" class="mt-4 grid grid-cols-2 gap-2">
+        <input id="foodName" placeholder="Food Name" class="border p-2 rounded" required>
+        <input id="foodQty" placeholder="Quantity" class="border p-2 rounded" required>
+        <button class="col-span-2 bg-green-600 hover:bg-green-700 text-white py-2 rounded">
+          Add Food
+        </button>
+      </form>
     </div>
-
-    <!-- Details Modal -->
-    <div id="detailsModal" x-cloak
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
-        <div class="w-full max-w-3xl bg-white rounded-xl shadow p-6">
-            <div class="flex items-start justify-between">
-                <h3 id="detailsTitle" class="text-xl font-semibold">Fridge Details</h3>
-                <button id="closeDetails" class="text-slate-500 hover:text-slate-800">✕</button>
-            </div>
-
-            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="space-y-2">
-                    <div class="text-sm text-slate-500">ID</div>
-                    <div id="detailId" class="font-mono font-semibold text-slate-700">—</div>
-
-                    <div class="text-sm text-slate-500 mt-3">Location</div>
-                    <div id="detailLocation" class="text-slate-700">—</div>
-
-                    <div class="text-sm text-slate-500 mt-3">Status</div>
-                    <div id="detailStatus" class="inline-flex items-center gap-2">
-                        <span id="detailStatusBadge" class="px-2 py-1 rounded text-white text-sm">—</span>
-                    </div>
-                </div>
-
-                <div class="space-y-2">
-                    <div class="text-sm text-slate-500">Temperature</div>
-                    <div id="detailTemp" class="text-slate-700">— °C</div>
-
-                    <div class="text-sm text-slate-500 mt-3">Humidity</div>
-                    <div id="detailHumidity" class="text-slate-700">— %</div>
-
-                    <div class="text-sm text-slate-500 mt-3">Last updated</div>
-                    <div id="detailUpdated" class="text-slate-700">—</div>
-                </div>
-            </div>
-
-            <div class="mt-6">
-                <div class="flex items-center justify-between">
-                    <h4 class="font-semibold">Food Items</h4>
-                    <div class="text-sm text-slate-500">Manage items in this fridge</div>
-                </div>
-
-                <ul id="foodList" class="mt-3 divide-y rounded border bg-slate-50"></ul>
-
-                <form id="addFoodForm" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <input id="newFoodName" placeholder="Item name" class="px-3 py-2 border rounded-md" required />
-                    <input id="newFoodQty" placeholder="Quantity" class="px-3 py-2 border rounded-md" required />
-                    <div class="flex gap-2">
-                        <button id="addFoodBtn" class="bg-green-600 text-white px-4 py-2 rounded-md">Add Item</button>
-                        <button id="bulkRemoveBtn" type="button"
-                            class="px-4 py-2 border rounded-md text-slate-600">Remove Selected</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Delete Confirmation -->
-    <div id="deleteConfirm" x-cloak
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
-        <div class="bg-white p-6 rounded-xl shadow max-w-md w-full">
-            <h4 class="text-lg font-semibold">Delete Fridge</h4>
-            <p class="text-sm text-slate-600 mt-2">This will permanently remove the fridge and its data from Firestore.
-            </p>
-            <div class="mt-4 flex gap-2 justify-end">
-                <button id="cancelDelete" class="px-4 py-2 border rounded-md">Cancel</button>
-                <button id="confirmDelete" class="px-4 py-2 bg-red-600 text-white rounded-md">Delete</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Firebase & App Logic -->
-    <script type="module">
-        // --- FIREBASE imports (Firestore SDK v10+) ---
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-        import {
-            getFirestore, collection, doc, getDoc, getDocs, onSnapshot,
-            setDoc, updateDoc, deleteDoc, query, orderBy
-        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-
-        // --- CONFIG (preserved from original) ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyDvRN3BXwGXKLUn9TJFv5kYcQCucSM5-2Y",
-            authDomain: "mealmap-123.firebaseapp.com",
-            projectId: "mealmap-123",
-            storageBucket: "mealmap-123.firebasestorage.app",
-            messagingSenderId: "517057007840",
-            appId: "1:517057007840:web:9efa6b0ac945f803e08085",
-        };
-
-        // Initialize
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        // --- App State & DOM refs ---
-        const refs = {
-            fridgeTableBody: document.getElementById('fridgeTableBody'),
-            totalFridges: document.getElementById('totalFridges'),
-            activeFridges: document.getElementById('activeFridges'),
-            avgTemp: document.getElementById('avgTemp'),
-            refreshBtn: document.getElementById('refreshBtn'),
-            addFridgeBtn: document.getElementById('addFridgeBtn'),
-            fridgeFormModal: document.getElementById('fridgeFormModal'),
-            formModalTitle: document.getElementById('formModalTitle'),
-            closeFormModal: document.getElementById('closeFormModal'),
-            fridgeForm: document.getElementById('fridgeForm'),
-            inputId: document.getElementById('inputId'),
-            inputLocation: document.getElementById('inputLocation'),
-            inputStatus: document.getElementById('inputStatus'),
-            inputTemp: document.getElementById('inputTemp'),
-            inputHumidity: document.getElementById('inputHumidity'),
-            saveFridgeBtn: document.getElementById('saveFridgeBtn'),
-            saveCreateNew: document.getElementById('saveCreateNew'),
-            cancelFormBtn: document.getElementById('cancelFormBtn'),
-            formSpinner: document.getElementById('formSpinner'),
-            detailsModal: document.getElementById('detailsModal'),
-            closeDetails: document.getElementById('closeDetails'),
-            detailsTitle: document.getElementById('detailsTitle'),
-            detailId: document.getElementById('detailId'),
-            detailLocation: document.getElementById('detailLocation'),
-            detailStatusBadge: document.getElementById('detailStatusBadge'),
-            detailTemp: document.getElementById('detailTemp'),
-            detailHumidity: document.getElementById('detailHumidity'),
-            detailUpdated: document.getElementById('detailUpdated'),
-            foodList: document.getElementById('foodList'),
-            addFoodForm: document.getElementById('addFoodForm'),
-            newFoodName: document.getElementById('newFoodName'),
-            newFoodQty: document.getElementById('newFoodQty'),
-            addFoodBtn: document.getElementById('addFoodBtn'),
-            bulkRemoveBtn: document.getElementById('bulkRemoveBtn'),
-            deleteConfirm: document.getElementById('deleteConfirm'),
-            confirmDelete: document.getElementById('confirmDelete'),
-            cancelDelete: document.getElementById('cancelDelete'),
-            searchInput: document.getElementById('searchInput'),
-            statusFilter: document.getElementById('statusFilter'),
-            shownCount: document.getElementById('shownCount'),
-            refreshIcon: document.getElementById('refreshIcon'),
-            mobileMenuBtn: document.getElementById('mobileMenuBtn'),
-            sidebar: document.getElementById('sidebar'),
-        };
-
-        // Local state
-        let fridgesCache = []; // { id, data }
-        let unsubscribe = null;
-        let selectedFridgeId = null;
-        let pendingDeleteId = null;
-
-        // --- Utilities ---
-        const formatDateTime = (ts) => {
-            if (!ts) return '—';
-            try {
-                const d = ts.toDate ? ts.toDate() : new Date(ts);
-                return d.toLocaleString();
-            } catch (e) {
-                return String(ts);
-            }
-        };
-
-        const showElement = (el) => el.classList.remove('hidden');
-        const hideElement = (el) => el.classList.add('hidden');
-
-        const setLoading = (btn, state = true) => {
-            if (!btn) return;
-            btn.disabled = state;
-            if (state) btn.classList.add('opacity-70', 'cursor-not-allowed');
-            else btn.classList.remove('opacity-70', 'cursor-not-allowed');
-        };
-
-        // small spinner "rotate" on refresh icon when loading
-        function animateRefresh(enable) {
-            if (enable) refs.refreshIcon.classList.add('animate-spin');
-            else refs.refreshIcon.classList.remove('animate-spin');
-        }
-
-        // --- Firestore listeners & CRUD ---
-        function subscribeFridges() {
-            // unsubscribe previous
-            if (typeof unsubscribe === 'function') unsubscribe();
-
-            const colRef = collection(db, 'refrigerators');
-            // optional ordering by id — change as needed
-            const q = query(colRef, orderBy('__name__'));
-            unsubscribe = onSnapshot(q, snapshot => {
-                const list = [];
-                snapshot.forEach(docSnap => list.push({ id: docSnap.id, data: docSnap.data() }));
-                fridgesCache = list;
-                renderTable();
-                updateSummary();
-            }, err => {
-                console.error('onSnapshot error', err);
-            });
-        }
-
-        async function reloadOnce() {
-            // trigger a manual reload (one-shot)
-            animateRefresh(true);
-            try {
-                const col = collection(db, 'refrigerators');
-                const snaps = await getDocs(col);
-                fridgesCache = [];
-                snaps.forEach(s => fridgesCache.push({ id: s.id, data: s.data() }));
-                renderTable();
-                updateSummary();
-            } catch (err) {
-                console.error('manual reload failed', err);
-                alert('Reload failed — check console');
-            } finally {
-                setTimeout(() => animateRefresh(false), 500);
-            }
-        }
-
-        async function saveFridgeDocument({ id, location, status, temperature, humidity }) {
-            setLoading(refs.saveFridgeBtn, true);
-            refs.formSpinner.classList.remove('hidden');
-
-            try {
-                const fridgeRef = doc(db, 'refrigerators', id);
-                const existsSnap = await getDoc(fridgeRef);
-
-                const payload = {
-                    location: location || '',
-                    status: status || 'inactive',
-                    temperature: (temperature === '' || temperature === null || isNaN(temperature)) ? null : Number(temperature),
-                    humidity: (humidity === '' || humidity === null || isNaN(humidity)) ? null : Number(humidity),
-                    updatedAt: new Date()
-                };
-
-                if (existsSnap.exists()) {
-                    // preserve existing foodItems if any
-                    const existing = existsSnap.data();
-                    if (existing.foodItems) payload.foodItems = existing.foodItems;
-                    await updateDoc(fridgeRef, payload);
-                } else {
-                    payload.foodItems = []; // initialize
-                    await setDoc(fridgeRef, payload);
-                }
-                // success
-                hideElement(refs.fridgeFormModal);
-            } catch (err) {
-                console.error('save error', err);
-                alert('Save failed — check console');
-            } finally {
-                refs.formSpinner.classList.add('hidden');
-                setLoading(refs.saveFridgeBtn, false);
-            }
-        }
-
-        async function deleteFridgeDocument(id) {
-            setLoading(refs.confirmDelete, true);
-            try {
-                await deleteDoc(doc(db, 'refrigerators', id));
-                hideElement(refs.deleteConfirm);
-                pendingDeleteId = null;
-            } catch (err) {
-                console.error('delete error', err);
-                alert('Delete failed — check console');
-            } finally {
-                setLoading(refs.confirmDelete, false);
-            }
-        }
-
-        async function loadFridgeDetails(id) {
-            try {
-                const snap = await getDoc(doc(db, 'refrigerators', id));
-                if (!snap.exists()) throw new Error('Fridge not found');
-                return { id: snap.id, data: snap.data() };
-            } catch (err) {
-                console.error('load details', err);
-                throw err;
-            }
-        }
-
-        async function addFoodItemToFridge(id, item) {
-            try {
-                const ref = doc(db, 'refrigerators', id);
-                const snap = await getDoc(ref);
-                if (!snap.exists()) throw new Error('Fridge not found');
-                const data = snap.data();
-                const list = Array.isArray(data.foodItems) ? data.foodItems.slice() : [];
-                list.push(item);
-                await updateDoc(ref, { foodItems: list, updatedAt: new Date() });
-            } catch (err) {
-                console.error('addFood', err);
-                throw err;
-            }
-        }
-
-        async function removeFoodItemsFromFridge(id, indexesToRemove) {
-            try {
-                const ref = doc(db, 'refrigerators', id);
-                const snap = await getDoc(ref);
-                if (!snap.exists()) throw new Error('Fridge not found');
-                const data = snap.data();
-                let list = Array.isArray(data.foodItems) ? data.foodItems.slice() : [];
-                // remove by index descending to avoid reindexing issues
-                indexesToRemove.sort((a, b) => b - a).forEach(i => list.splice(i, 1));
-                await updateDoc(ref, { foodItems: list, updatedAt: new Date() });
-            } catch (err) {
-                console.error('removeFoodItems', err);
-                throw err;
-            }
-        }
-
-        // --- Rendering ---
-        function renderTable() {
-            const term = refs.searchInput.value?.toLowerCase()?.trim() || '';
-            const statusFilter = refs.statusFilter.value;
-
-            // apply filters
-            let visible = fridgesCache.filter(f => {
-                if (statusFilter !== 'all' && (f.data.status || 'inactive') !== statusFilter) return false;
-                if (!term) return true;
-                return f.id.toLowerCase().includes(term) || (f.data.location || '').toLowerCase().includes(term);
-            });
-
-            refs.fridgeTableBody.innerHTML = visible.map(f => {
-                const d = f.data;
-                const status = (d.status || 'inactive');
-                const temp = d.temperature ?? '—';
-                const hum = d.humidity ?? '—';
-                const statusClass = status === 'active' ? 'bg-emerald-500' : 'bg-red-500';
-                return `
-          <tr class="hover:bg-slate-50">
-            <td class="px-4 py-3 font-mono text-sm">${escapeHtml(f.id)}</td>
-            <td class="px-4 py-3 text-sm">${escapeHtml(d.location || '—')}</td>
-            <td class="px-4 py-3">
-              <span class="inline-block px-3 py-1 text-white text-sm rounded ${statusClass}">${escapeHtml(status)}</span>
-            </td>
-            <td class="px-4 py-3 text-right text-sm">${temp}</td>
-            <td class="px-4 py-3 text-right text-sm">${hum}</td>
-            <td class="px-4 py-3 text-center">
-              <div class="inline-flex gap-2">
-                <button data-id="${encodeURIComponent(f.id)}" class="viewBtn px-3 py-1 rounded border text-sm hover:bg-slate-100">View</button>
-                <button data-id="${encodeURIComponent(f.id)}" class="editBtn px-3 py-1 rounded border text-sm hover:bg-slate-100">Edit</button>
-                <button data-id="${encodeURIComponent(f.id)}" class="deleteBtn px-3 py-1 rounded border text-sm text-red-600 hover:bg-slate-50">Delete</button>
-              </div>
-            </td>
-          </tr>`;
-            }).join('');
-
-            // attach action listeners
-            Array.from(document.getElementsByClassName('viewBtn')).forEach(btn => {
-                btn.onclick = () => showDetails(decodeURIComponent(btn.getAttribute('data-id')));
-            });
-            Array.from(document.getElementsByClassName('editBtn')).forEach(btn => {
-                btn.onclick = () => openEditForm(decodeURIComponent(btn.getAttribute('data-id')));
-            });
-            Array.from(document.getElementsByClassName('deleteBtn')).forEach(btn => {
-                btn.onclick = () => openDeleteConfirm(decodeURIComponent(btn.getAttribute('data-id')));
-            });
-
-            refs.shownCount.innerText = visible.length;
-        }
-
-        function updateSummary() {
-            refs.totalFridges.innerText = fridgesCache.length;
-            refs.activeFridges.innerText = fridgesCache.filter(f => (f.data.status || 'inactive') === 'active').length;
-            const temps = fridgesCache.map(f => Number(f.data.temperature)).filter(v => !isNaN(v));
-            const avg = temps.length ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : '—';
-            refs.avgTemp.innerText = avg;
-        }
-
-        // --- Modals & UI flows ---
-        function openAddForm() {
-            refs.formModalTitle.innerText = 'Add Fridge';
-            refs.inputId.disabled = false;
-            refs.inputId.value = '';
-            refs.inputLocation.value = '';
-            refs.inputStatus.value = 'active';
-            refs.inputTemp.value = '';
-            refs.inputHumidity.value = '';
-            refs.saveFridgeBtn.innerText = 'Save';
-            showElement(refs.fridgeFormModal);
-            refs.inputId.focus();
-        }
-
-        async function openEditForm(id) {
-            try {
-                const { data } = await loadFridgeDetails(id);
-                refs.formModalTitle.innerText = 'Edit Fridge';
-                refs.inputId.value = id;
-                refs.inputId.disabled = true; // id immutable for edit
-                refs.inputLocation.value = data.location || '';
-                refs.inputStatus.value = data.status || 'inactive';
-                refs.inputTemp.value = (data.temperature !== null && data.temperature !== undefined) ? data.temperature : '';
-                refs.inputHumidity.value = (data.humidity !== null && data.humidity !== undefined) ? data.humidity : '';
-                refs.saveFridgeBtn.innerText = 'Update';
-                showElement(refs.fridgeFormModal);
-            } catch (err) {
-                alert('Failed to load fridge for editing.');
-            }
-        }
-
-        function closeFormModal() {
-            hideElement(refs.fridgeFormModal);
-        }
-
-        function openDetailsModal(fridge) {
-            // fridge: { id, data }
-            selectedFridgeId = fridge.id;
-            refs.detailsTitle.innerText = `Fridge • ${fridge.id}`;
-            refs.detailId.innerText = fridge.id;
-            refs.detailLocation.innerText = fridge.data.location || '—';
-            refs.detailStatusBadge.innerText = fridge.data.status || 'inactive';
-            refs.detailStatusBadge.className = `px-2 py-1 rounded text-white text-sm ${(fridge.data.status === 'active') ? 'bg-emerald-500' : 'bg-red-500'}`;
-            refs.detailTemp.innerText = (fridge.data.temperature !== null && fridge.data.temperature !== undefined) ? `${fridge.data.temperature} °C` : '—';
-            refs.detailHumidity.innerText = (fridge.data.humidity !== null && fridge.data.humidity !== undefined) ? `${fridge.data.humidity} %` : '—';
-            refs.detailUpdated.innerText = fridge.data.updatedAt ? formatDateTime(fridge.data.updatedAt) : '—';
-
-            renderFoodList(fridge.data.foodItems || []);
-            showElement(refs.detailsModal);
-        }
-
-        function closeDetailsModal() {
-            hideElement(refs.detailsModal);
-            selectedFridgeId = null;
-        }
-
-        function openDeleteConfirm(id) {
-            pendingDeleteId = id;
-            showElement(refs.deleteConfirm);
-        }
-
-        function closeDeleteConfirm() {
-            hideElement(refs.deleteConfirm);
-            pendingDeleteId = null;
-        }
-
-        // Food list UI (with checkboxes)
-        function renderFoodList(items) {
-            if (!Array.isArray(items) || items.length === 0) {
-                refs.foodList.innerHTML = `<li class="px-4 py-3 text-sm text-slate-500">No items</li>`;
-                return;
-            }
-            refs.foodList.innerHTML = items.map((it, idx) => `
-        <li class="flex items-center justify-between px-4 py-2">
-          <label class="flex items-center gap-3">
-            <input type="checkbox" data-idx="${idx}" class="foodCheckbox" />
-            <div>
-              <div class="font-medium text-sm">${escapeHtml(it.name)}</div>
-              <div class="text-xs text-slate-500">Qty: ${escapeHtml(String(it.quantity))}</div>
-            </div>
-          </label>
-          <button data-idx="${idx}" class="removeOneBtn px-3 py-1 text-sm text-red-600 hover:bg-slate-100 rounded">Remove</button>
-        </li>
-      `).join('');
-
-            // attach handlers
-            Array.from(document.getElementsByClassName('removeOneBtn')).forEach(b => {
-                b.onclick = async () => {
-                    const idx = Number(b.getAttribute('data-idx'));
-                    if (!confirm('Remove this item?')) return;
-                    try {
-                        setLoading(b, true);
-                        await removeFoodItemsFromFridge(selectedFridgeId, [idx]);
-                        const fresh = await loadFridgeDetails(selectedFridgeId);
-                        renderFoodList(fresh.data.foodItems || []);
-                    } catch (err) {
-                        alert('Could not remove item.');
-                    } finally {
-                        setLoading(b, false);
-                    }
-                };
-            });
-        }
-
-        // --- Event wiring ---
-        refs.addFridgeBtn.onclick = openAddForm;
-        refs.closeFormModal.onclick = closeFormModal;
-        refs.cancelFormBtn.onclick = closeFormModal;
-
-        // form submit handler
-        refs.fridgeForm.onsubmit = async (ev) => {
-            ev.preventDefault();
-            const id = refs.inputId.value.trim();
-            if (!id) return alert('Provide a fridge ID.');
-            const payload = {
-                id,
-                location: refs.inputLocation.value.trim(),
-                status: refs.inputStatus.value,
-                temperature: refs.inputTemp.value === '' ? null : Number(refs.inputTemp.value),
-                humidity: refs.inputHumidity.value === '' ? null : Number(refs.inputHumidity.value)
-            };
-            await saveFridgeDocument(payload);
-        };
-
-        refs.saveCreateNew.onclick = async () => {
-            // save and reset for new entry
-            const id = refs.inputId.value.trim();
-            if (!id) return alert('Provide a fridge ID.');
-            const payload = {
-                id,
-                location: refs.inputLocation.value.trim(),
-                status: refs.inputStatus.value,
-                temperature: refs.inputTemp.value === '' ? null : Number(refs.inputTemp.value),
-                humidity: refs.inputHumidity.value === '' ? null : Number(refs.inputHumidity.value)
-            };
-            await saveFridgeDocument(payload);
-            // reset for new
-            refs.inputId.disabled = false;
-            refs.inputId.value = '';
-            refs.inputLocation.value = '';
-            refs.inputStatus.value = 'active';
-            refs.inputTemp.value = '';
-            refs.inputHumidity.value = '';
-            refs.inputId.focus();
-        };
-
-        // search & filter handlers (live)
-        refs.searchInput.addEventListener('input', renderTable);
-        refs.statusFilter.addEventListener('change', renderTable);
-
-        // Refresh button
-        refs.refreshBtn.onclick = async () => {
-            animateRefresh(true);
-            // small delay for UX
-            await reloadOnce();
-            setTimeout(() => animateRefresh(false), 350);
-        };
-
-        // Details modal handlers
-        refs.closeDetails.onclick = closeDetailsModal;
-
-        // Add food submit
-        refs.addFoodForm.onsubmit = async (ev) => {
-            ev.preventDefault();
-            const name = refs.newFoodName.value.trim();
-            const qty = refs.newFoodQty.value.trim();
-            if (!name || !qty) return alert('Enter name and quantity');
-            setLoading(refs.addFoodBtn, true);
-            try {
-                await addFoodItemToFridge(selectedFridgeId, { name, quantity: qty });
-                const fresh = await loadFridgeDetails(selectedFridgeId);
-                renderFoodList(fresh.data.foodItems || []);
-                refs.newFoodName.value = '';
-                refs.newFoodQty.value = '';
-            } catch (err) {
-                alert('Failed to add item');
-            } finally {
-                setLoading(refs.addFoodBtn, false);
-            }
-        };
-
-        // bulk remove handler
-        refs.bulkRemoveBtn.onclick = async () => {
-            const boxes = Array.from(document.getElementsByClassName('foodCheckbox'));
-            const idxs = boxes.map(b => b.checked ? Number(b.getAttribute('data-idx')) : -1).filter(i => i >= 0);
-            if (!idxs.length) return alert('Select items to remove.');
-            if (!confirm(`Remove ${idxs.length} items?`)) return;
-            try {
-                setLoading(refs.bulkRemoveBtn, true);
-                await removeFoodItemsFromFridge(selectedFridgeId, idxs);
-                const fresh = await loadFridgeDetails(selectedFridgeId);
-                renderFoodList(fresh.data.foodItems || []);
-            } catch (err) {
-                alert('Bulk remove failed');
-            } finally {
-                setLoading(refs.bulkRemoveBtn, false);
-            }
-        };
-
-        // Delete confirm handlers
-        refs.cancelDelete.onclick = closeDeleteConfirm;
-        refs.confirmDelete.onclick = async () => {
-            if (!pendingDeleteId) return closeDeleteConfirm();
-            await deleteFridgeDocument(pendingDeleteId);
-        };
-
-        // mobile menu toggle
-        refs.mobileMenuBtn.onclick = () => {
-            refs.sidebar.classList.toggle('hidden');
-        };
-
-        // sidebar quick nav
-        document.querySelectorAll('[data-section]').forEach(btn => {
-            btn.onclick = (ev) => {
-                const sec = btn.getAttribute('data-section');
-                document.getElementById('pageTitle').innerText = sec.charAt(0).toUpperCase() + sec.slice(1);
-                // small highlight set
-                document.querySelectorAll('[data-section]').forEach(b => b.classList.remove('bg-slate-100'));
-                btn.classList.add('bg-slate-100');
-            };
-        });
-
-        // helper: escape HTML (safer insertion)
-        function escapeHtml(str) {
-            if (str === null || str === undefined) return '';
-            return String(str)
-                .replaceAll('&', '&amp;')
-                .replaceAll('<', '&lt;')
-                .replaceAll('>', '&gt;')
-                .replaceAll('"', '&quot;')
-                .replaceAll("'", '&#039;');
-        }
-
-        // show details from row
-        async function showDetails(id) {
-            try {
-                const obj = await loadFridgeDetails(id);
-                openDetailsModal(obj);
-            } catch (err) {
-                alert('Could not load fridge details.');
-            }
-        }
-
-        // start listener on load
-        (function init() {
-            subscribeFridges();
-
-            // expose some functions for debugging from console if needed:
-            window.reloadOnce = reloadOnce;
-            window.showDetails = showDetails;
-
-            // initial UI state
-            hideElement(refs.fridgeFormModal);
-            hideElement(refs.detailsModal);
-            hideElement(refs.deleteConfirm);
-        })();
-
-        // cleanup on unload
-        window.addEventListener('beforeunload', () => {
-            if (typeof unsubscribe === 'function') unsubscribe();
-        });
-
-    </script>
+  </div>
 </body>
-
 </html>
