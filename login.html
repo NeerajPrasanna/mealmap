@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MealMap Admin Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+        import {
+            getFirestore, collection, getDocs, query, where
+        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+        // --- Firebase Config ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDvRN3BXwGXKLUn9TJFv5kYcQCucSM5-2Y",
+            authDomain: "mealmap-123.firebaseapp.com",
+            projectId: "mealmap-123",
+            storageBucket: "mealmap-123.firebasestorage.app",
+            messagingSenderId: "517057007840",
+            appId: "1:517057007840:web:9efa6b0ac945f803e08085",
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const loginForm = document.getElementById("loginForm");
+        const errorBox = document.getElementById("errorBox");
+
+        loginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            errorBox.classList.add("hidden");
+
+            const email = loginForm.email.value.trim();
+            const password = loginForm.password.value.trim();
+
+            if (!email || !password) return showError("Please fill in all fields.");
+
+            try {
+                // Query Firestore for matching admin
+                const adminsRef = collection(db, "admins");
+                const q = query(adminsRef, where("email", "==", email), where("password", "==", password));
+                const snap = await getDocs(q);
+
+                if (!snap.empty) {
+                    // Success
+                    localStorage.setItem("mealmapAdmin", email);
+                    window.location.href = "dashboard.html"; // redirect to your main admin panel
+                } else {
+                    showError("Invalid credentials. Try again.");
+                }
+            } catch (err) {
+                console.error("Login error:", err);
+                showError("An error occurred. Check console for details.");
+            }
+        });
+
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.classList.remove("hidden");
+        }
+    </script>
+</head>
+
+<body class="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 min-h-screen flex items-center justify-center">
+
+    <div class="bg-white shadow-2xl rounded-2xl w-full max-w-md p-8">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">MealMap Admin Login</h1>
+
+        <div id="errorBox" class="hidden bg-red-100 text-red-700 px-3 py-2 rounded mb-4 text-sm"></div>
+
+        <form id="loginForm" class="space-y-4">
+            <div>
+                <label class="block text-gray-700 text-sm mb-1">Email</label>
+                <input type="email" name="email" required
+                    class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+
+            <div>
+                <label class="block text-gray-700 text-sm mb-1">Password</label>
+                <input type="password" name="password" required
+                    class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+
+            <button class="w-full bg-indigo-600 text-white py-2 rounded font-semibold hover:bg-indigo-700 transition">
+                Login
+            </button>
+        </form>
+    </div>
+
+</body>
+
+</html>

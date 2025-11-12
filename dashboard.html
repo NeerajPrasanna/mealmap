@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>MealMap Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+        import {
+            getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+            collection, onSnapshot
+        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+        // --- Firebase Config ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDvRN3BXwGXKLUn9TJFv5kYcQCucSM5-2Y",
+            authDomain: "mealmap-123.firebaseapp.com",
+            projectId: "mealmap-123",
+            storageBucket: "mealmap-123.firebasestorage.app",
+            messagingSenderId: "517057007840",
+            appId: "1:517057007840:web:9efa6b0ac945f803e08085",
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        // --- Auth Check ---
+        if (!localStorage.getItem("mealmapAdmin")) {
+            window.location.href = "login.html"; // force redirect if not logged in
+        }
+        window.logout = function () {
+            localStorage.removeItem("mealmapAdmin");
+            window.location.href = "login.html";
+        }
+
+        // --- DOM Elements ---
+        const fridgeTableBody = document.getElementById("fridgeTableBody");
+        const fridgeForm = document.getElementById("fridgeForm");
+        const loadingSpinner = document.getElementById("loadingSpinner");
+
+        const modal = document.getElementById("fridgeModal");
+        const modalTitle = document.getElementById("modalTitle");
+        const modalFridgeId = document.getElementById("modalFridgeId");
+        const modalLocation = document.getElementById("modalLocation");
+        const modalStatus = document.getElementById("modalStatus");
+        const modalTemp = document.getElementById("modalTemp");
+        const modalHumidity = document.getElementById("modalHumidity");
+        const modalFoodList = document.getElementById("modalFood");
+
+        // --- Real-time Listener ---
+        function initRealtimeFridges() {
+            showLoading(true);
+            const fridgesRef = collection(db, "refrigerators");
+            onSnapshot(fridgesRef, (snapshot) => {
+                fridgeTableBody.innerHTML = "";
+                snapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    const row = document.createElement("tr");
+                    row.className = "hover:bg-gray-50 dark:hover:bg-gray-800 transition";
+                    row.innerHTML = `
+            <td class="px-4 py-3 font-semibold">${docSnap.id}</td>
+            <td class="px-4 py-3">${data.location}</td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-1 rounded-full text-xs font-semibold text-white ${data.status === "active" ? "bg-emerald-500" : "bg-rose-500"}">
+                ${data.status}
+              </span>
+            </td>
+            <td class="px-4 py-3">${data.temperature ?? "-"}</td>
+            <td class="px-4 py-3">${data.humidity ?? "-"}</td>
+            <td class="px-4 py-3 space-x-2">
+              <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm" data-id="${docSnap.id}" data-action="view">View</button>
+              <button class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-md text-sm" data-id="${docSnap.id}" data-action="edit">Edit</button>
+              <button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-md text-sm" data-id="${docSnap.id}" data-action="delete">Delete</button>
+            </td>`;
+                    fridgeTableBody.appendChild(row);
+                });
+                showLoading(false);
+            });
+        }
+
+        // --- Save Fridge (Add / Update) ---
+        async function saveFridge(e) {
+            e.preventDefault();
+            const id = fridgeForm.fridgeId.value.trim();
+            const location = fridgeForm.location.value.trim();
+            const status = fridgeForm.status.value;
+            const temperature = parseFloat(fridgeForm.temperature.value) || null;
+            const humidity = parseFloat(fridgeForm.humidity.value) || null;
+
+            if (!id || !location) return alert("Please fill required fields.");
+            showLoading(true);
+
+            try {
+                const ref = doc(db, "refrigerators", id);
+                const snap = await getDoc(ref);
+                const data = { location, status, temperature, humidity };
+
+                if (snap.exists()) await updateDoc(ref, data);
+                else await setDoc(ref, { ...data, foodItems: [] });
+
+                fridgeForm.reset();
+            } catch (err) {
+                console.error("Save error:", err);
+            }
+            showLoading(false);
+        }
+
+        // --- Delete Fridge ---
+        async function deleteFridge(id) {
+            if (!confirm(`Delete fridge ${id}?`)) return;
+            showLoading(true);
+            try {
+                await deleteDoc(doc(db, "refrigerators", id));
+            } catch (err) {
+                console.error("Delete error:", err);
+            }
+            showLoading(false);
+        }
+
+        // --- Edit Fridge (prefill form) ---
+        async function editFridge(id) {
+            const snap = await getDoc(doc(db, "refrigerators", id));
+            if (!snap.exists()) return alert("Fridge not found.");
+            const data = snap.data();
+            fridgeForm.fridgeId.value = id;
+            fridgeForm.location.value = data.location;
+            fridgeForm.status.value = data.status;
+            fridgeForm.temperature.value = data.temperature ?? "";
+            fridgeForm.humidity.value = data.humidity ?? "";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        // --- View Modal ---
+        async function showDetails(id) {
+            const snap = await getDoc(doc(db, "refrigerators", id));
+            if (!snap.exists()) return alert("Fridge not found.");
+            const data = snap.data();
+            modalFridgeId.value = id;
+            modalTitle.innerText = `Fridge: ${id}`;
+            modalLocation.innerText = data.location;
+            modalStatus.innerText = data.status;
+            modalTemp.innerText = data.temperature ?? "-";
+            modalHumidity.innerText = data.humidity ?? "-";
+            modalFoodList.innerHTML = "";
+
+            (data.foodItems || []).forEach((item, i) => {
+                const li = document.createElement("li");
+                li.className = "flex justify-between items-center py-1 border-b border-gray-200";
+                li.innerHTML = `
+          <span>${item.name} (${item.quantity})</span>
+          <button data-index="${i}" data-id="${id}" class="text-red-500 hover:text-red-700 text-sm">🗑</button>`;
+                modalFoodList.appendChild(li);
+            });
+
+            modal.classList.remove("hidden");
+        }
+
+        // --- Modal Controls ---
+        window.closeModal = () => modal.classList.add("hidden");
+
+        // --- Add Food ---
+        async function addFoodItem(e) {
+            e.preventDefault();
+            const id = modalFridgeId.value;
+            const name = document.getElementById("foodName").value.trim();
+            const qty = document.getElementById("foodQty").value.trim();
+            if (!name || !qty) return alert("Enter both name and quantity.");
+
+            const ref = doc(db, "refrigerators", id);
+            const snap = await getDoc(ref);
+            const updated = [...(snap.data().foodItems || []), { name, quantity: qty }];
+            await updateDoc(ref, { foodItems: updated });
+            document.getElementById("foodName").value = "";
+            document.getElementById("foodQty").value = "";
+            showDetails(id);
+        }
+
+        // --- Remove Food ---
+        modalFoodList.addEventListener("click", async (e) => {
+            if (e.target.matches("button[data-index]")) {
+                const id = e.target.dataset.id;
+                const i = e.target.dataset.index;
+                const ref = doc(db, "refrigerators", id);
+                const snap = await getDoc(ref);
+                const items = snap.data().foodItems || [];
+                items.splice(i, 1);
+                await updateDoc(ref, { foodItems: items });
+                showDetails(id);
+            }
+        });
+
+        // --- Table Buttons ---
+        fridgeTableBody.addEventListener("click", (e) => {
+            const btn = e.target.closest("button[data-id]");
+            if (!btn) return;
+            const id = btn.dataset.id;
+            const action = btn.dataset.action;
+            if (action === "view") showDetails(id);
+            if (action === "edit") editFridge(id);
+            if (action === "delete") deleteFridge(id);
+        });
+
+        // --- Spinner ---
+        function showLoading(show) {
+            loadingSpinner.classList.toggle("hidden", !show);
+        }
+
+        // --- Init ---
+        fridgeForm.addEventListener("submit", saveFridge);
+        document.getElementById("addFoodForm").addEventListener("submit", addFoodItem);
+        window.addEventListener("load", initRealtimeFridges);
+    </script>
+</head>
+
+<body
+    class="bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-gray-800 text-gray-800 dark:text-gray-200 min-h-screen flex">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-900 text-gray-100 flex flex-col">
+        <div class="p-6 text-2xl font-bold border-b border-gray-700">🍱 MealMap Admin</div>
+        <nav class="flex-1 p-4 space-y-2">
+            <a href="#" class="block px-3 py-2 rounded-md bg-gray-800 text-white font-medium">Dashboard</a>
+            <button onclick="logout()" class="bg-red-600 text-white px-3 py-1 rounded">Logout</button>
+
+        </nav>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 p-8 overflow-auto">
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 dark:text-gray-100">Fridge Manager</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">Monitor, update and manage your connected fridges in
+                real-time.</p>
+        </header>
+
+        <div id="loadingSpinner" class="hidden text-center py-4">
+            <div class="animate-spin border-t-4 border-emerald-500 border-solid rounded-full w-10 h-10 mx-auto"></div>
+        </div>
+
+        <!-- Add Form -->
+        <section
+            class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg mb-8 border border-gray-200 dark:border-gray-700">
+            <h2 class="text-2xl font-semibold mb-4">Add / Update Fridge</h2>
+            <form id="fridgeForm" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <input name="fridgeId" placeholder="Fridge ID"
+                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md" required>
+                <input name="location" placeholder="Location"
+                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md" required>
+                <select name="status" class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+                <input name="temperature" type="number" placeholder="Temperature (°C)"
+                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
+                <input name="humidity" type="number" placeholder="Humidity (%)"
+                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
+                <button
+                    class="col-span-1 md:col-span-2 lg:col-span-3 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-semibold transition">
+                    💾 Save Fridge
+                </button>
+            </form>
+        </section>
+
+        <!-- Table -->
+        <section class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+            <h2 class="text-2xl font-semibold mb-4">Fridges List</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full border-collapse rounded-xl overflow-hidden">
+                    <thead class="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                        <tr>
+                            <th class="px-4 py-3 text-left">ID</th>
+                            <th class="px-4 py-3 text-left">Location</th>
+                            <th class="px-4 py-3 text-left">Status</th>
+                            <th class="px-4 py-3 text-left">Temp (°C)</th>
+                            <th class="px-4 py-3 text-left">Humidity (%)</th>
+                            <th class="px-4 py-3 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fridgeTableBody" class="divide-y divide-gray-200 dark:divide-gray-700"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal -->
+    <div id="fridgeModal"
+        class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center hidden z-50">
+        <div class="bg-white dark:bg-gray-900 rounded-xl p-6 w-full max-w-lg shadow-2xl relative">
+            <button onclick="closeModal()"
+                class="absolute top-3 right-4 text-3xl text-gray-500 hover:text-gray-300">&times;</button>
+            <h2 id="modalTitle" class="text-2xl font-bold mb-4">Fridge Details</h2>
+            <input type="hidden" id="modalFridgeId" />
+            <p><strong>📍 Location:</strong> <span id="modalLocation"></span></p>
+            <p><strong>⚙️ Status:</strong> <span id="modalStatus"></span></p>
+            <p><strong>🌡 Temperature:</strong> <span id="modalTemp"></span> °C</p>
+            <p><strong>💧 Humidity:</strong> <span id="modalHumidity"></span> %</p>
+
+            <h3 class="font-semibold mt-4 mb-2 text-lg">🥗 Food Items</h3>
+            <ul id="modalFood" class="border p-3 rounded-lg bg-gray-50 dark:bg-gray-800 max-h-40 overflow-y-auto"></ul>
+
+            <form id="addFoodForm" class="mt-4 grid grid-cols-2 gap-2">
+                <input id="foodName" placeholder="Food Name"
+                    class="border p-2 rounded-md dark:bg-gray-800 dark:border-gray-700" required>
+                <input id="foodQty" placeholder="Quantity"
+                    class="border p-2 rounded-md dark:bg-gray-800 dark:border-gray-700" required>
+                <button class="col-span-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg transition">
+                    ➕ Add Food
+                </button>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>
