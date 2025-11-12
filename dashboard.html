@@ -125,9 +125,6 @@
             const data = snap.data();
             fridgeForm.fridgeId.value = id;
             fridgeForm.location.value = data.location;
-            fridgeForm.status.value = data.status;
-            fridgeForm.temperature.value = data.temperature ?? "";
-            fridgeForm.humidity.value = data.humidity ?? "";
             window.scrollTo({ top: 0, behavior: "smooth" });
         }
 
@@ -246,14 +243,6 @@
                     class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md" required>
                 <input name="location" placeholder="Location"
                     class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md" required>
-                <select name="status" class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                </select>
-                <input name="temperature" type="number" placeholder="Temperature (°C)"
-                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
-                <input name="humidity" type="number" placeholder="Humidity (%)"
-                    class="border border-gray-300 dark:border-gray-600 bg-transparent p-2 rounded-md">
                 <button
                     class="col-span-1 md:col-span-2 lg:col-span-3 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-semibold transition">
                     💾 Save Fridge
@@ -313,3 +302,4 @@
 
 
 </html>
+
